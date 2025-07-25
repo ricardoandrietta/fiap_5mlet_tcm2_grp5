@@ -8,6 +8,10 @@ import os
 import sys
 from datetime import datetime
 import pandas as pd
+
+# Adicionar o diretório raiz do projeto ao Python path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 from ETL.extract import B3DataExtractor
 
 def test_extraction():

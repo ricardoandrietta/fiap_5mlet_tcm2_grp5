@@ -1,21 +1,33 @@
-# ETL B3 IBOVESPA - Extract Script
+# ETL B3 IBOVESPA - Pipeline Completo
 
-Este script Python extrai dados do índice IBOVESPA do site da B3 (Brasil, Bolsa, Balcão) e salva os dados em formato Parquet no Amazon S3 com particionamento diário.
+Este projeto contém uma pipeline ETL completa para processar dados do índice IBOVESPA da B3 (Brasil, Bolsa, Balcão). A pipeline inclui extração, transformação e salvamento dos dados em formato Parquet no Amazon S3 com particionamento diário.
 
 ## Funcionalidades
 
+### Extract (ETL/extract.py)
 - **API REST da B3**: Acesso direto à API oficial da B3 (não web scraping)
 - **URL dinâmica**: Parâmetros da API gerados automaticamente via base64
 - **Configuração flexível**: Tamanho de página, índice e idioma configuráveis
 - **Paginação automática**: Opção para extrair todas as páginas disponíveis
+- **Retry logic**: Múltiplas tentativas com delays inteligentes
+
+### Transform (ETL/transform.py)
+- **Agregação por ativo**: Agrupamento automático por asset
+- **Cálculos de métricas**: Contagem de códigos, soma de participação e quantidade teórica
+- **Limpeza de dados**: Remoção de colunas desnecessárias
+- **Enriquecimento**: Adição de timestamp de processamento
+- **Padronização**: Renomeação de colunas conforme especificação
+
+### Geral
 - **Formato Parquet**: Dados salvos em formato otimizado para análise
 - **Particionamento diário**: Organização automática por data (year/month/day)
 - **Bucket S3 configurável**: Fácil configuração via variáveis de ambiente
-- **Retry logic**: Múltiplas tentativas com delays inteligentes
 - **Logging detalhado**: Rastreamento completo de todas as operações
+- **Pipeline flexível**: Execute extract, transform ou pipeline completo
 
 ## Estrutura dos Dados
 
+### Dados Extraídos (Raw)
 O script extrai os dados da seção "results" que contém:
 
 ```json
@@ -29,6 +41,29 @@ O script extrai os dados da seção "results" que contém:
   "theoricalQty": "476.976.044"
 }
 ```
+
+### Dados Transformados
+Após a transformação, os dados são agregados por ativo:
+
+```json
+{
+  "acao": "ALLOS",
+  "qtd_codigo": 2,
+  "participacao": 0.98,
+  "qtd_teorica_total": 953952088,
+  "data": "2025-07-25"
+}
+```
+
+### Transformações Aplicadas
+1. **Agrupamento por asset**: Dados agrupados pela coluna "asset"
+2. **Agregações**:
+   - `qtd_codigo`: Contagem de códigos por ativo
+   - `participacao`: Soma da participação percentual
+   - `qtd_teorica_total`: Soma da quantidade teórica
+3. **Renomeação**: Coluna "asset" renomeada para "acao"
+4. **Enriquecimento**: Adição da coluna "data" com data de processamento
+5. **Limpeza**: Remoção das colunas "segment", "type" e "partAcum"
 
 ## Instalação
 
@@ -123,8 +158,46 @@ export B3_PAGE_SIZE="100"
 
 ### Execução Local
 
+O script principal (`main.py`) oferece três operações:
+
 ```bash
-python extract.py
+# Apenas extração (default)
+python main.py extract
+# ou simplesmente
+python main.py
+
+# Apenas transformação
+python main.py transform
+
+# Pipeline completo (extração + transformação)
+python main.py pipeline
+```
+
+### Execução de Módulos Individuais
+
+```bash
+# Executar apenas extração
+python ETL/extract.py
+
+# Executar apenas transformação
+python ETL/transform.py
+```
+
+### Execução de Testes
+
+```bash
+# Executar todos os testes
+python run_tests.py
+
+# Executar apenas teste de extração
+python run_tests.py extract
+
+# Executar apenas teste de transformação
+python run_tests.py transform
+
+# Executar testes individuais
+python testes/test_extract.py
+python testes/test_transform.py
 ```
 
 ### Uso no AWS Spark/EMR
@@ -149,14 +222,21 @@ Os dados são salvos com a seguinte estrutura:
 
 ```
 s3://seu-bucket/
-└── ibovespa-data/
+├── ibovespa-data/                    # Dados brutos extraídos
+│   └── year=2024/
+│       └── month=01/
+│           └── day=15/
+│               └── ibovespa_20240115.parquet
+└── ibovespa-data-transformed/        # Dados transformados
     └── year=2024/
         └── month=01/
             └── day=15/
-                └── ibovespa_20240115.parquet
+                └── ibovespa_transformed_20240115.parquet
 ```
 
-## Campos do DataFrame Final
+## Campos dos DataFrames
+
+### DataFrame Extraído (Raw)
 
 | Campo | Tipo | Descrição |
 |-------|------|-----------|
@@ -172,6 +252,16 @@ s3://seu-bucket/
 | data_date | string | Data dos dados (do header) |
 | total_theoretical_qty | string | Quantidade teórica total |
 | reductor | string | Redutor |
+
+### DataFrame Transformado
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| acao | string | Nome do ativo (renomeado de asset) |
+| qtd_codigo | int | Quantidade de códigos por ativo |
+| participacao | float | Soma da participação percentual por ativo |
+| qtd_teorica_total | int | Soma da quantidade teórica por ativo |
+| data | string | Data de processamento (Y-m-d) |
 
 ## Logs
 
@@ -193,12 +283,18 @@ O script é robusto e trata:
 - Erros de upload S3
 - Dados malformados
 
-## Próximos Passos
+## Componentes da Pipeline
 
-Este é o script **extract.py** da pipeline ETL. Os próximos componentes serão:
+A pipeline ETL B3 IBOVESPA contém os seguintes componentes:
 
-- **transform.py**: Limpeza e transformação dos dados
-- **load.py**: Carregamento final para data warehouse/analytics
+- ✅ **extract.py**: Extração de dados da API B3 (Implementado)
+- ✅ **transform.py**: Transformação e agregação dos dados (Implementado)
+- 🔄 **load.py**: Carregamento final para data warehouse/analytics (Próximo passo)
+
+### Scripts de Teste
+- ✅ **testes/test_extract.py**: Teste local da extração
+- ✅ **testes/test_transform.py**: Teste local das transformações
+- ✅ **run_tests.py**: Script para executar todos os testes
 
 ## Troubleshooting
 
