@@ -34,7 +34,9 @@ from ETL.extract import B3DataExtractor
 from ETL.transform import B3DataTransformer
 
 # Configurações
+STORAGE_TYPE = os.getenv('STORAGE_TYPE', 's3')  # 's3' ou 'local'
 S3_BUCKET = os.getenv('S3_BUCKET', 'your-bucket-name-here')
+LOCAL_ROOT = os.getenv('LOCAL_ROOT', 'extracted_raw')
 AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
 
@@ -59,7 +61,9 @@ def extract_data():
         
         # Instanciar extrator com configurações
         extractor = B3DataExtractor(
-            s3_bucket=S3_BUCKET,
+            storage_type=STORAGE_TYPE,
+            s3_bucket=S3_BUCKET if STORAGE_TYPE == 's3' else None,
+            local_root=LOCAL_ROOT if STORAGE_TYPE == 'local' else None,
             page_size=B3_PAGE_SIZE,
             index=B3_INDEX,
             language=B3_LANGUAGE,
@@ -85,8 +89,8 @@ def extract_data():
             logger.error("DataFrame vazio após processamento")
             return False
         
-        # Salvar no S3
-        success = extractor.save_to_s3(df)
+        # Salvar dados
+        success = extractor.save_data(df)
         
         if success:
             logger.info("=== ETL Extract concluído com sucesso ===")
@@ -154,12 +158,16 @@ def main():
     """Função principal do script"""
     try:
         # Verificar configurações
-        if S3_BUCKET == 'your-bucket-name-here':
+        if STORAGE_TYPE == 's3' and S3_BUCKET == 'your-bucket-name-here':
             logger.error("Configure a variável de ambiente S3_BUCKET antes de executar o script")
             return False
         
-        logger.info(f"Bucket S3 configurado: {S3_BUCKET}")
-        logger.info(f"Região AWS: {AWS_REGION}")
+        logger.info(f"Tipo de armazenamento: {STORAGE_TYPE}")
+        if STORAGE_TYPE == 's3':
+            logger.info(f"Bucket S3 configurado: {S3_BUCKET}")
+            logger.info(f"Região AWS: {AWS_REGION}")
+        else:
+            logger.info(f"Pasta local configurada: {LOCAL_ROOT}")
         
         # Determinar operação baseada nos argumentos
         operation = 'extract'  # default

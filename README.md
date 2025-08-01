@@ -1,6 +1,6 @@
 # ETL B3 IBOVESPA - Pipeline Completo
 
-Este projeto contém uma pipeline ETL completa para processar dados do índice IBOVESPA da B3 (Brasil, Bolsa, Balcão). A pipeline inclui extração, transformação e salvamento dos dados em formato Parquet no Amazon S3 com particionamento diário.
+Este projeto contém uma pipeline ETL completa para processar dados do índice IBOVESPA da B3 (Brasil, Bolsa, Balcão). A pipeline inclui extração, transformação e salvamento dos dados em formato Parquet com particionamento diário, suportando tanto armazenamento local quanto Amazon S3.
 
 ## Funcionalidades
 
@@ -21,6 +21,7 @@ Este projeto contém uma pipeline ETL completa para processar dados do índice I
 ### Geral
 - **Formato Parquet**: Dados salvos em formato otimizado para análise
 - **Particionamento diário**: Organização automática por data (year/month/day)
+- **Armazenamento flexível**: Suporte para S3 e armazenamento local
 - **Bucket S3 configurável**: Fácil configuração via variáveis de ambiente
 - **Logging detalhado**: Rastreamento completo de todas as operações
 - **Pipeline flexível**: Execute extract, transform ou pipeline completo
@@ -81,8 +82,10 @@ pip install -r requirements.txt
 Configure as seguintes variáveis de ambiente:
 
 ```bash
-# Configurações obrigatórias
-export S3_BUCKET="seu-bucket-s3"
+# Configurações de armazenamento
+export STORAGE_TYPE="s3"       # "s3" ou "local" (default: "s3")
+export S3_BUCKET="seu-bucket-s3"  # obrigatório se STORAGE_TYPE="s3"
+export LOCAL_ROOT="extracted_raw"  # pasta local (default: "extracted_raw")
 
 # Configurações opcionais da AWS
 export AWS_REGION="us-east-1"  # default: us-east-1
@@ -156,6 +159,30 @@ export B3_PAGE_SIZE="100"
 
 ## Uso
 
+### Configuração de Armazenamento
+
+O script suporta dois tipos de armazenamento:
+
+#### 1. Armazenamento Local
+```bash
+# Configurar para armazenamento local
+export STORAGE_TYPE="local"
+export LOCAL_ROOT="extracted_raw"  # opcional, default: "extracted_raw"
+
+# Executar extração
+python main.py extract
+```
+
+#### 2. Armazenamento S3
+```bash
+# Configurar para armazenamento S3
+export STORAGE_TYPE="s3"
+export S3_BUCKET="seu-bucket-s3"
+
+# Executar extração
+python main.py extract
+```
+
 ### Execução Local
 
 O script principal (`main.py`) oferece três operações:
@@ -200,6 +227,20 @@ python testes/test_extract.py
 python testes/test_transform.py
 ```
 
+### Exemplo de Uso
+
+Execute o script de exemplo para testar ambas as opções de armazenamento:
+
+```bash
+# Executar exemplo com armazenamento local e S3 (se configurado)
+python example_usage.py
+```
+
+Este script demonstra:
+- Como usar armazenamento local (cria pasta `extracted_raw`)
+- Como usar armazenamento S3 (se `S3_BUCKET` estiver configurado)
+- Estrutura de particionamento idêntica para ambos os casos
+
 ### Uso no AWS Spark/EMR
 
 1. Faça upload do script para seu cluster Spark
@@ -216,10 +257,11 @@ spark-submit --packages org.apache.spark:spark-sql_2.12:3.4.0 extract.py
 2. Configure as variáveis de ambiente na função Lambda
 3. Configure timeout adequado (recomendado: 5+ minutos)
 
-## Estrutura de Arquivos no S3
+## Estrutura de Arquivos
 
-Os dados são salvos com a seguinte estrutura:
+Os dados são salvos com a seguinte estrutura (idêntica para S3 e armazenamento local):
 
+### S3
 ```
 s3://seu-bucket/
 ├── ibovespa-data/                    # Dados brutos extraídos
@@ -232,6 +274,15 @@ s3://seu-bucket/
         └── month=01/
             └── day=15/
                 └── ibovespa_transformed_20240115.parquet
+```
+
+### Armazenamento Local
+```
+extracted_raw/
+├── year=2024/
+│   └── month=01/
+│       └── day=15/
+│           └── ibovespa_20240115.parquet
 ```
 
 ## Campos dos DataFrames

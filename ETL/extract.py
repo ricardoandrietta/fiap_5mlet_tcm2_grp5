@@ -35,6 +35,7 @@ from botocore.exceptions import NoCredentialsError, ClientError
 import pyarrow as pa
 import pyarrow.parquet as pq
 from io import BytesIO
+from pathlib import Path
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -42,21 +43,36 @@ logger = logging.getLogger(__name__)
 class B3DataExtractor:
     """Classe para extrair dados do IBOVESPA da B3"""
     
-    def __init__(self, s3_bucket: str, page_size: int = 1200, index: str = "IBOV", 
-                 language: str = "pt-br", aws_region: str = "us-east-1"):
+    def __init__(self, storage_type: str = "s3", s3_bucket: str = None, local_root: str = "extracted_raw", 
+                 page_size: int = 1200, index: str = "IBOV", language: str = "pt-br", 
+                 aws_region: str = "us-east-1"):
         """
         Inicializa o extrator de dados da B3
         
         Args:
-            s3_bucket: Nome do bucket S3 para salvar os dados
+            storage_type: Tipo de armazenamento ("s3" ou "local")
+            s3_bucket: Nome do bucket S3 para salvar os dados (obrigatório se storage_type="s3")
+            local_root: Pasta raiz para armazenamento local (default: "extracted_raw")
             page_size: Número de registros por página (1-1200)
             index: Índice da B3 (IBOV, SMLL, MLCX, etc.)
             language: Idioma da API (pt-br, en-us)
             aws_region: Região AWS para S3
         """
         self.base_api_url = "https://sistemaswebb3-listados.b3.com.br/indexProxy/indexCall/GetPortfolioDay"
-        self.s3_bucket = s3_bucket
-        self.s3_client = boto3.client('s3', region_name=aws_region)
+        self.storage_type = storage_type.lower()
+        
+        # Configuração baseada no tipo de armazenamento
+        if self.storage_type == "s3":
+            if not s3_bucket:
+                raise ValueError("s3_bucket é obrigatório quando storage_type='s3'")
+            self.s3_bucket = s3_bucket
+            self.s3_client = boto3.client('s3', region_name=aws_region)
+        elif self.storage_type == "local":
+            self.local_root = Path(local_root)
+            # Criar diretório se não existir
+            self.local_root.mkdir(parents=True, exist_ok=True)
+        else:
+            raise ValueError("storage_type deve ser 's3' ou 'local'")
         
         # Parâmetros configuráveis da API
         self.page_size = page_size
@@ -336,9 +352,10 @@ class B3DataExtractor:
             logger.error(f"Erro ao limpar DataFrame: {e}")
             return df
     
-    def save_to_s3(self, df: pd.DataFrame, partition_date: date = None) -> bool:
+    def save_data(self, df: pd.DataFrame, partition_date: date = None) -> bool:
         """
-        Salva o DataFrame no S3 em formato parquet com particionamento diário
+        Salva o DataFrame em formato parquet com particionamento diário
+        (S3 ou local, dependendo da configuração)
         
         Args:
             df: DataFrame para salvar
@@ -349,17 +366,44 @@ class B3DataExtractor:
         """
         try:
             if df.empty:
-                logger.warning("DataFrame vazio, não salvando no S3")
+                logger.warning("DataFrame vazio, não salvando dados")
                 return False
             
             if partition_date is None:
                 partition_date = date.today()
             
-            # Criar chave do S3 com particionamento
+            # Criar estrutura de particionamento
             year = partition_date.year
             month = f"{partition_date.month:02d}"
             day = f"{partition_date.day:02d}"
             
+            if self.storage_type == "s3":
+                return self._save_to_s3(df, partition_date, year, month, day)
+            elif self.storage_type == "local":
+                return self._save_to_local(df, partition_date, year, month, day)
+            else:
+                logger.error(f"Tipo de armazenamento não suportado: {self.storage_type}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Erro ao salvar dados: {e}")
+            return False
+    
+    def _save_to_s3(self, df: pd.DataFrame, partition_date: date, year: int, month: str, day: str) -> bool:
+        """
+        Salva o DataFrame no S3 em formato parquet
+        
+        Args:
+            df: DataFrame para salvar
+            partition_date: Data para particionamento
+            year: Ano da partição
+            month: Mês da partição
+            day: Dia da partição
+            
+        Returns:
+            True se salvou com sucesso, False caso contrário
+        """
+        try:
             s3_key = f"ibovespa-data/year={year}/month={month}/day={day}/ibovespa_{partition_date.strftime('%Y%m%d')}.parquet"
             
             # Converter DataFrame para parquet em memória
@@ -395,4 +439,46 @@ class B3DataExtractor:
             return False
         except Exception as e:
             logger.error(f"Erro ao salvar no S3: {e}")
-            return False 
+            return False
+    
+    def _save_to_local(self, df: pd.DataFrame, partition_date: date, year: int, month: str, day: str) -> bool:
+        """
+        Salva o DataFrame localmente em formato parquet
+        
+        Args:
+            df: DataFrame para salvar
+            partition_date: Data para particionamento
+            year: Ano da partição
+            month: Mês da partição
+            day: Dia da partição
+            
+        Returns:
+            True se salvou com sucesso, False caso contrário
+        """
+        try:
+            # Criar estrutura de diretórios
+            partition_path = self.local_root / f"year={year}" / f"month={month}" / f"day={day}"
+            partition_path.mkdir(parents=True, exist_ok=True)
+            
+            # Nome do arquivo
+            filename = f"ibovespa_{partition_date.strftime('%Y%m%d')}.parquet"
+            file_path = partition_path / filename
+            
+            # Salvar DataFrame em parquet
+            df.to_parquet(file_path, index=False, engine='pyarrow')
+            
+            logger.info(f"Dados salvos localmente: {file_path}")
+            logger.info(f"Total de registros salvos: {len(df)}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erro ao salvar localmente: {e}")
+            return False
+    
+    def save_to_s3(self, df: pd.DataFrame, partition_date: date = None) -> bool:
+        """
+        Método de compatibilidade - redireciona para save_data
+        """
+        logger.warning("save_to_s3 está deprecated. Use save_data() em seu lugar.")
+        return self.save_data(df, partition_date) 
